@@ -1,0 +1,52 @@
+version: 2
+jobs:
+  mock_aws_test:
+    docker:
+      - image: cimg/python:3.10.2
+    steps:
+      - attach_workspace:
+          at: /home/circleci
+
+      # The weird way you have to set PATH in Circle 2.0
+      - run: |
+          echo 'export PATH=$HOME/.local/bin:$HOME/terraform:$HOME/packer:$PATH' >> $BASH_ENV
+      - run:
+          name: install mock aws server
+          command: |
+            pip install moto[server]
+      - run:
+          name: install aws cli
+          command: |
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+      - run:
+          name: run mock aws server
+          command: |
+            moto_server | tee /tmp/logs/moto_server_output.log
+          background: true
+      - run:
+          name: wait for mock aws server
+          command: |
+            while ! AWS_REGION=us-west-2 AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy aws --endpoint http://localhost:5000 sts get-caller-identity; do
+              echo "Waiting for local mock AWS server"
+              sleep 1
+            done
+      - run:
+          command: |
+            AWS_REGION=us-west-2 AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy aws --endpoint http://localhost:5000 sts get-caller-identity
+
+      # Store test result and log artifacts for browsing purposes
+      - store_artifacts:
+          path: /tmp/logs
+      - store_test_results:
+          path: /tmp/logs
+
+workflows:
+  version: 2
+  build-and-test:
+    jobs:
+      - mock_aws_test:
+          filters:
+            tags:
+              only: /^v.*/
